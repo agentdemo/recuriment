@@ -429,7 +429,7 @@ const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob,
             <p className="text-gray-500">Create your first job posting to start finding candidates</p>
           </div>
         ) : (
-        {postedJobs.map((job) => (
+        postedJobs.map((job) => (
           <div key={job.id} className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
             <div className="flex justify-between items-start mb-4">
               <div>
@@ -503,7 +503,6 @@ const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob,
             </div>
           </div>
         ))}
-        )}
       </div>
     </div>
   );
