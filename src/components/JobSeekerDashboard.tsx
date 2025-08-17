@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { useEffect } from 'react';
 import AIResumeBuilder from './AIResumeBuilder';
 import ResumeRating from './ResumeRating';
 import AIChatbot from './AIChatbot';
+import { applicationService, type Application } from '../lib/supabase';
 import { 
   User, 
   FileText, 
@@ -24,6 +26,8 @@ import {
 interface JobSeekerDashboardProps {
   onBack: () => void;
   jobs: Job[];
+  user: any;
+  onJobsUpdate: () => void;
 }
 
 interface Job {
@@ -61,7 +65,7 @@ interface ResumeData {
   skills: string[];
 }
 
-const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs }) => {
+const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, user, onJobsUpdate }) => {
   const [activeTab, setActiveTab] = useState('jobs');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
@@ -69,16 +73,65 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs })
   const [showResumeRating, setShowResumeRating] = useState(false);
   const [showChatbot, setShowChatbot] = useState(false);
   const [savedResume, setSavedResume] = useState<ResumeData | null>(null);
+  const [applications, setApplications] = useState<Application[]>([]);
 
   const handleSaveResume = (resumeData: ResumeData) => {
     setSavedResume(resumeData);
     setShowAIBuilder(false);
   };
 
+  useEffect(() => {
+    if (user) {
+      loadApplications();
+    }
+  }, [user]);
+
+  const loadApplications = async () => {
+    if (!user) return;
+    
+    try {
+      const userApplications = await applicationService.getByUserId(user.id);
+      setApplications(userApplications);
+    } catch (error) {
+      console.error('Error loading applications:', error);
+    }
+  };
+
+  const handleApplyToJob = async (job: Job) => {
+    if (!user) {
+      alert('Please sign in to apply for jobs');
+      return;
+    }
+
+    try {
+      // Check if already applied
+      const existingApplication = await applicationService.checkExisting(job.id, user.id);
+      if (existingApplication) {
+        alert('You have already applied to this job');
+        return;
+      }
+
+      // Create application
+      await applicationService.create({
+        job_id: job.id,
+        user_id: user.id,
+        status: 'applied',
+        cover_letter: '',
+        resume_data: savedResume || {}
+      });
+
+      alert('Application submitted successfully!');
+      loadApplications();
+    } catch (error) {
+      console.error('Error applying to job:', error);
+      alert('Failed to submit application. Please try again.');
+    }
+  };
+
   // Mock user profile data
   const userProfile = {
-    name: 'John Doe',
-    email: 'john@example.com',
+    name: user?.email?.split('@')[0] || 'User',
+    email: user?.email || '',
     phone: '+1 (555) 123-4567',
     location: 'San Francisco, CA',
     bio: 'Passionate frontend developer with 5+ years of experience building responsive web applications...'
@@ -271,7 +324,7 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs })
               </div>
 
               <button className="w-full py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all transform hover:-translate-y-0.5">
-                Apply Now
+                <span onClick={() => handleApplyToJob(selectedJob)}>Apply Now</span>
               </button>
             </div>
           ) : (
@@ -306,7 +359,7 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs })
             <label className="block text-sm font-medium text-gray-700 mb-2">Full Name</label>
             <input 
               type="text" 
-              defaultValue="John Doe" 
+              defaultValue={userProfile.name} 
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -314,7 +367,7 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs })
             <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
             <input 
               type="email" 
-              defaultValue="john@example.com" 
+              defaultValue={userProfile.email} 
               className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
             />
           </div>
@@ -520,28 +573,33 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs })
     <div className="flex-1 p-6">
       <h1 className="text-3xl font-bold text-gray-800 mb-6">My Applications</h1>
       <div className="space-y-4">
-        {[
-          { title: 'Senior Frontend Developer', company: 'TechCorp', status: 'Interview Scheduled', statusColor: 'blue' },
-          { title: 'UX/UI Designer', company: 'DesignStudio', status: 'Under Review', statusColor: 'yellow' },
-          { title: 'Full Stack Developer', company: 'StartupABC', status: 'Rejected', statusColor: 'red' }
-        ].map((app, index) => (
-          <div key={index} className="bg-white border border-gray-200 rounded-xl p-6">
+        {applications.length === 0 ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-12 text-center">
+            <Briefcase className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">No Applications Yet</h3>
+            <p className="text-gray-500">Start applying to jobs to see your applications here</p>
+          </div>
+        ) : (
+          applications.map((app) => (
+          <div key={app.id} className="bg-white border border-gray-200 rounded-xl p-6">
             <div className="flex justify-between items-start">
               <div>
-                <h3 className="text-xl font-semibold text-gray-800">{app.title}</h3>
-                <p className="text-blue-600 font-medium">{app.company}</p>
-                <p className="text-sm text-gray-500 mt-1">Applied 3 days ago</p>
+                <h3 className="text-xl font-semibold text-gray-800">{app.job?.title}</h3>
+                <p className="text-blue-600 font-medium">{app.job?.company}</p>
+                <p className="text-sm text-gray-500 mt-1">Applied {new Date(app.applied_at).toLocaleDateString()}</p>
               </div>
               <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                app.statusColor === 'blue' ? 'bg-blue-100 text-blue-800' :
-                app.statusColor === 'yellow' ? 'bg-yellow-100 text-yellow-800' :
+                app.status === 'interview_scheduled' ? 'bg-blue-100 text-blue-800' :
+                app.status === 'under_review' || app.status === 'applied' ? 'bg-yellow-100 text-yellow-800' :
+                app.status === 'accepted' ? 'bg-green-100 text-green-800' :
                 'bg-red-100 text-red-800'
               }`}>
-                {app.status}
+                {app.status.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
               </span>
             </div>
           </div>
-        ))}
+        ))
+        )}
       </div>
     </div>
   );

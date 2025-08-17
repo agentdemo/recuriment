@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
+import { useEffect } from 'react';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { jobService, applicationService, type Job as SupabaseJob } from '../lib/supabase';
 import { 
   ArrowLeft, 
   Building2, 
@@ -19,6 +21,7 @@ import {
 interface EmployerDashboardProps {
   onBack: () => void;
   onAddJob: (job: Omit<Job, 'id' | 'posted'>) => void;
+  user: any;
 }
 
 interface JobPosting {
@@ -47,9 +50,10 @@ interface Job {
   tags: string[];
 }
 
-const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob }) => {
+const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob, user }) => {
   const [activeTab, setActiveTab] = useState('post-job');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isPosting, setIsPosting] = useState(false);
   const [jobForm, setJobForm] = useState({
     title: '',
     company: '',
@@ -60,21 +64,55 @@ const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob 
     type: 'Full-time'
   });
   const [postedJobs, setPostedJobs] = useState<JobPosting[]>([
-    {
-      id: '1',
-      title: 'Senior Frontend Developer',
-      company: 'TechCorp',
-      location: 'San Francisco, CA',
-      salary: '$120k - $160k',
-      requirements: ['React', 'TypeScript', 'Node.js', '5+ years experience'],
-      description: 'We are looking for a talented Senior Frontend Developer...',
-      type: 'Full-time',
-      posted: '2 days ago',
-      status: 'active'
-    }
   ]);
 
   const genAI = new GoogleGenerativeAI('AIzaSyB7Hbl5seOhDqFSgPZCvV4ymlFTdKM_5gw');
+
+  useEffect(() => {
+    if (user) {
+      loadEmployerJobs();
+    }
+  }, [user]);
+
+  const loadEmployerJobs = async () => {
+    if (!user) return;
+    
+    try {
+      const jobs = await jobService.getByUserId(user.id);
+      const formattedJobs: JobPosting[] = jobs.map(job => ({
+        id: job.id,
+        title: job.title,
+        company: job.company,
+        location: job.location,
+        salary: job.salary,
+        requirements: job.requirements,
+        description: job.description,
+        type: job.type,
+        posted: formatTimeAgo(job.created_at),
+        status: job.status as 'active' | 'draft' | 'closed'
+      }));
+      setPostedJobs(formattedJobs);
+    } catch (error) {
+      console.error('Error loading employer jobs:', error);
+    }
+  };
+
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+    
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return `${diffInHours} hours ago`;
+    
+    const diffInDays = Math.floor(diffInHours / 24);
+    if (diffInDays === 1) return '1 day ago';
+    if (diffInDays < 7) return `${diffInDays} days ago`;
+    
+    const diffInWeeks = Math.floor(diffInDays / 7);
+    if (diffInWeeks === 1) return '1 week ago';
+    return `${diffInWeeks} weeks ago`;
+  };
 
   const handleInputChange = (field: string, value: string) => {
     setJobForm(prev => ({ ...prev, [field]: value }));
@@ -127,56 +165,64 @@ const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob 
     }
   };
 
-  const handlePostJob = () => {
+  const handlePostJob = async () => {
     if (!jobForm.title || !jobForm.company || !jobForm.location || !jobForm.description) {
       alert('Please fill in all required fields.');
       return;
     }
 
-    // Add job to global state for job seekers to see
-    const jobForJobSeekers: Omit<Job, 'id' | 'posted'> = {
-      title: jobForm.title,
-      company: jobForm.company,
-      location: jobForm.location,
-      type: jobForm.type,
-      salary: jobForm.salary,
-      description: jobForm.description,
-      requirements: jobForm.requirements.split(',').map(req => req.trim()).filter(req => req),
-      tags: [
-        jobForm.type,
-        jobForm.location.includes('Remote') ? 'Remote' : 'On-site',
-        jobForm.salary.includes('$') ? 'Competitive Salary' : 'Salary Negotiable'
-      ].filter(tag => tag)
-    };
-    
-    // Add to global jobs state
-    onAddJob(jobForJobSeekers);
+    setIsPosting(true);
+    try {
+      const jobData = {
+        title: jobForm.title,
+        company: jobForm.company,
+        location: jobForm.location,
+        type: jobForm.type,
+        salary: jobForm.salary,
+        description: jobForm.description,
+        requirements: jobForm.requirements.split(',').map(req => req.trim()).filter(req => req),
+        tags: [
+          jobForm.type,
+          jobForm.location.includes('Remote') ? 'Remote' : 'On-site',
+          jobForm.salary.includes('$') ? 'Competitive Salary' : 'Salary Negotiable'
+        ].filter(tag => tag),
+        status: 'active' as const
+      };
 
-    const newJob: JobPosting = {
-      id: Date.now().toString(),
-      title: jobForm.title,
-      company: jobForm.company,
-      location: jobForm.location,
-      salary: jobForm.salary,
-      requirements: jobForm.requirements.split(',').map(req => req.trim()).filter(req => req),
-      description: jobForm.description,
-      type: jobForm.type,
-      posted: 'Just now',
-      status: 'active'
-    };
+      await jobService.create(jobData);
+      
+      // Notify parent to reload jobs
+      onAddJob({
+        title: jobData.title,
+        company: jobData.company,
+        location: jobData.location,
+        type: jobData.type,
+        salary: jobData.salary,
+        description: jobData.description,
+        requirements: jobData.requirements,
+        tags: jobData.tags
+      });
 
-    setPostedJobs(prev => [newJob, ...prev]);
-    setJobForm({
-      title: '',
-      company: '',
-      location: '',
-      salary: '',
-      requirements: '',
-      description: '',
-      type: 'Full-time'
-    });
-    alert('Job posted successfully!');
-    setActiveTab('manage-jobs');
+      // Reset form
+      setJobForm({
+        title: '',
+        company: '',
+        location: '',
+        salary: '',
+        requirements: '',
+        description: '',
+        type: 'Full-time'
+      });
+      
+      alert('Job posted successfully!');
+      loadEmployerJobs();
+      setActiveTab('manage-jobs');
+    } catch (error) {
+      console.error('Error posting job:', error);
+      alert('Failed to post job. Please try again.');
+    } finally {
+      setIsPosting(false);
+    }
   };
 
   const renderPostJob = () => (
@@ -335,10 +381,20 @@ const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob 
               </button>
               <button
                 onClick={handlePostJob}
+                disabled={isPosting}
                 className="px-6 py-3 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-blue-800 transition-all flex items-center space-x-2"
               >
-                <Briefcase className="w-5 h-5" />
-                <span>Post Job</span>
+                {isPosting ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Posting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Briefcase className="w-5 h-5" />
+                    <span>Post Job</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -366,6 +422,13 @@ const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob 
       </div>
 
       <div className="grid gap-6">
+        {postedJobs.length === 0 ? (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-12 text-center">
+            <Briefcase className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-600 mb-2">No Jobs Posted Yet</h3>
+            <p className="text-gray-500">Create your first job posting to start finding candidates</p>
+          </div>
+        ) : (
         {postedJobs.map((job) => (
           <div key={job.id} className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6">
             <div className="flex justify-between items-start mb-4">
@@ -440,6 +503,7 @@ const EmployerDashboard: React.FC<EmployerDashboardProps> = ({ onBack, onAddJob 
             </div>
           </div>
         ))}
+        )}
       </div>
     </div>
   );
