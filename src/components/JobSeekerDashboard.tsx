@@ -3,12 +3,12 @@ import { useEffect } from 'react';
 import AIResumeBuilder from './AIResumeBuilder';
 import ResumeRating from './ResumeRating';
 import AIChatbot from './AIChatbot';
-import { applicationService, type Application } from '../lib/supabase';
-import { 
-  User, 
-  FileText, 
-  Briefcase, 
-  Settings, 
+import { applicationService, attachmentService, callRequestService, type Application, type Attachment, type CallRequest } from '../lib/supabase';
+import {
+  User,
+  FileText,
+  Briefcase,
+  Settings,
   Home,
   Search,
   Filter,
@@ -20,7 +20,13 @@ import {
   Send,
   Sparkles,
   TrendingUp,
-  MessageCircle
+  MessageCircle,
+  Upload,
+  Phone,
+  Paperclip,
+  X,
+  CheckCircle,
+  Loader2
 } from 'lucide-react';
 
 interface JobSeekerDashboardProps {
@@ -74,6 +80,12 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, u
   const [showChatbot, setShowChatbot] = useState(false);
   const [savedResume, setSavedResume] = useState<ResumeData | null>(null);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [callRequests, setCallRequests] = useState<CallRequest[]>([]);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showCallModal, setShowCallModal] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
+  const [submittingCall, setSubmittingCall] = useState(false);
 
   const handleSaveResume = (resumeData: ResumeData) => {
     setSavedResume(resumeData);
@@ -83,17 +95,114 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, u
   useEffect(() => {
     if (user) {
       loadApplications();
+      loadAttachments();
+      loadCallRequests();
     }
   }, [user]);
 
   const loadApplications = async () => {
     if (!user) return;
-    
+
     try {
       const userApplications = await applicationService.getByUserId(user.id);
       setApplications(userApplications);
     } catch (error) {
       console.error('Error loading applications:', error);
+    }
+  };
+
+  const loadAttachments = async () => {
+    if (!user) return;
+
+    try {
+      const userAttachments = await attachmentService.getByUserId(user.id);
+      setAttachments(userAttachments);
+    } catch (error) {
+      console.error('Error loading attachments:', error);
+    }
+  };
+
+  const loadCallRequests = async () => {
+    if (!user) return;
+
+    try {
+      const userCallRequests = await callRequestService.getByUserId(user.id);
+      setCallRequests(userCallRequests);
+    } catch (error) {
+      console.error('Error loading call requests:', error);
+    }
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size must be less than 10MB');
+      return;
+    }
+
+    setUploadingFile(true);
+    try {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const base64 = e.target?.result as string;
+        await attachmentService.create({
+          user_id: user.id,
+          file_name: file.name,
+          file_url: base64,
+          file_type: file.type,
+          file_size: file.size
+        });
+
+        await loadAttachments();
+        setShowUploadModal(false);
+        alert('File uploaded successfully!');
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file. Please try again.');
+    } finally {
+      setUploadingFile(false);
+    }
+  };
+
+  const handleDeleteAttachment = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this attachment?')) return;
+
+    try {
+      await attachmentService.delete(id);
+      await loadAttachments();
+    } catch (error) {
+      console.error('Error deleting attachment:', error);
+      alert('Failed to delete attachment. Please try again.');
+    }
+  };
+
+  const handleCallRequest = async (formData: { phoneNumber: string; preferredTime: string; notes: string }) => {
+    if (!user || !selectedJob) return;
+
+    setSubmittingCall(true);
+    try {
+      await callRequestService.create({
+        user_id: user.id,
+        job_id: selectedJob.id,
+        recruiter_id: (selectedJob as any).posted_by || '',
+        status: 'pending',
+        phone_number: formData.phoneNumber,
+        preferred_time: formData.preferredTime,
+        notes: formData.notes
+      });
+
+      await loadCallRequests();
+      setShowCallModal(false);
+      alert('Call request submitted successfully! The recruiter will contact you soon.');
+    } catch (error) {
+      console.error('Error submitting call request:', error);
+      alert('Failed to submit call request. Please try again.');
+    } finally {
+      setSubmittingCall(false);
     }
   };
 
@@ -342,6 +451,31 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, u
   const renderProfile = () => (
     <div className="flex-1 p-6">
       <h1 className="text-3xl font-bold text-gray-800 mb-6">Profile Settings</h1>
+
+      {/* Quick Action Buttons */}
+      <div className="grid md:grid-cols-2 gap-4 mb-6">
+        <button
+          onClick={() => setShowUploadModal(true)}
+          className="flex items-center justify-center space-x-3 p-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+        >
+          <Upload className="w-6 h-6" />
+          <span>Upload Attachment</span>
+        </button>
+        <button
+          onClick={() => {
+            if (!selectedJob) {
+              alert('Please select a job first to request a call with the recruiter');
+              return;
+            }
+            setShowCallModal(true);
+          }}
+          className="flex items-center justify-center space-x-3 p-6 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl font-semibold hover:from-green-700 hover:to-green-800 transition-all shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+        >
+          <Phone className="w-6 h-6" />
+          <span>Call Recruiter</span>
+        </button>
+      </div>
+
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
         <div className="flex items-center space-x-6 mb-8">
           <div className="w-24 h-24 bg-gradient-to-r from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
@@ -403,6 +537,75 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, u
             Save Changes
           </button>
         </div>
+      </div>
+
+      {/* Attachments Section */}
+      <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+          <Paperclip className="w-5 h-5 mr-2" />
+          My Attachments
+        </h2>
+        {attachments.length === 0 ? (
+          <p className="text-gray-500 text-center py-8">No attachments uploaded yet</p>
+        ) : (
+          <div className="space-y-3">
+            {attachments.map((attachment) => (
+              <div key={attachment.id} className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                <div className="flex items-center space-x-3">
+                  <FileText className="w-5 h-5 text-blue-600" />
+                  <div>
+                    <p className="font-medium text-gray-800">{attachment.file_name}</p>
+                    <p className="text-sm text-gray-500">
+                      {(attachment.file_size / 1024).toFixed(2)} KB - {new Date(attachment.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleDeleteAttachment(attachment.id)}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Call Requests Section */}
+      <div className="mt-6 bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
+          <Phone className="w-5 h-5 mr-2" />
+          Call Requests
+        </h2>
+        {callRequests.length === 0 ? (
+          <p className="text-gray-500 text-center py-8">No call requests yet</p>
+        ) : (
+          <div className="space-y-3">
+            {callRequests.map((request) => (
+              <div key={request.id} className="p-4 border border-gray-200 rounded-lg">
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <p className="font-medium text-gray-800">{request.job?.title}</p>
+                    <p className="text-sm text-gray-600">{request.job?.company}</p>
+                  </div>
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    request.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                    request.status === 'completed' ? 'bg-green-100 text-green-800' :
+                    'bg-red-100 text-red-800'
+                  }`}>
+                    {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-500">Phone: {request.phone_number}</p>
+                {request.preferred_time && (
+                  <p className="text-sm text-gray-500">Preferred Time: {request.preferred_time}</p>
+                )}
+                <p className="text-xs text-gray-400 mt-2">Requested {new Date(request.created_at).toLocaleDateString()}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -612,7 +815,7 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, u
         </div>
       ) : showChatbot ? (
         <div className="flex-1">
-          <AIChatbot 
+          <AIChatbot
             onBack={() => setShowChatbot(false)}
             userProfile={userProfile}
             resumeData={savedResume}
@@ -627,7 +830,7 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, u
           {activeTab === 'applications' && renderApplications()}
           {activeTab === 'chatbot' && (
             <div className="flex-1">
-              <AIChatbot 
+              <AIChatbot
                 onBack={() => setActiveTab('jobs')}
                 userProfile={userProfile}
                 resumeData={savedResume}
@@ -635,6 +838,139 @@ const JobSeekerDashboard: React.FC<JobSeekerDashboardProps> = ({ onBack, jobs, u
             </div>
           )}
         </>
+      )}
+
+      {/* Upload Attachment Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 relative">
+            <button
+              onClick={() => setShowUploadModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-gradient-to-r from-blue-600 to-blue-700 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Upload className="w-8 h-8 text-white" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Upload Attachment</h2>
+              <p className="text-gray-600">Upload your resume, cover letter, or other documents</p>
+            </div>
+
+            <div className="mb-6">
+              <label className="flex flex-col items-center justify-center w-full p-8 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors">
+                <Upload className="w-12 h-12 text-gray-400 mb-3" />
+                <span className="text-sm text-gray-600 mb-2">Click to upload or drag and drop</span>
+                <span className="text-xs text-gray-500">PDF, DOC, DOCX (MAX. 10MB)</span>
+                <input
+                  type="file"
+                  className="hidden"
+                  accept=".pdf,.doc,.docx,.txt"
+                  onChange={handleFileUpload}
+                  disabled={uploadingFile}
+                />
+              </label>
+            </div>
+
+            {uploadingFile && (
+              <div className="flex items-center justify-center space-x-3 text-blue-600">
+                <Loader2 className="w-5 h-5 animate-spin" />
+                <span>Uploading...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Call Recruiter Modal */}
+      {showCallModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 relative">
+            <button
+              onClick={() => setShowCallModal(false)}
+              className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-gradient-to-r from-green-600 to-green-700 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <Phone className="w-8 h-8 text-white" />
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">Request a Call</h2>
+              <p className="text-gray-600">Schedule a call with the recruiter for {selectedJob?.title}</p>
+            </div>
+
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.currentTarget);
+              handleCallRequest({
+                phoneNumber: formData.get('phoneNumber') as string,
+                preferredTime: formData.get('preferredTime') as string,
+                notes: formData.get('notes') as string
+              });
+            }}>
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Phone Number *
+                  </label>
+                  <input
+                    type="tel"
+                    name="phoneNumber"
+                    required
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="+1 (555) 123-4567"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Preferred Time
+                  </label>
+                  <input
+                    type="text"
+                    name="preferredTime"
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="e.g., Weekdays 2-4 PM"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Additional Notes
+                  </label>
+                  <textarea
+                    name="notes"
+                    rows={3}
+                    className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    placeholder="Any specific topics you'd like to discuss..."
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={submittingCall}
+                className="w-full py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:from-green-700 hover:to-green-800 transition-all flex items-center justify-center space-x-2"
+              >
+                {submittingCall ? (
+                  <>
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                    <span>Submitting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Phone className="w-5 h-5" />
+                    <span>Request Call</span>
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
       )}
     </div>
   );

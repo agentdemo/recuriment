@@ -34,7 +34,31 @@ export interface Application {
   applied_at: string;
   cover_letter?: string;
   resume_data?: any;
-  job?: Job; // For joined queries
+  job?: Job;
+}
+
+export interface Attachment {
+  id: string;
+  user_id: string;
+  job_id?: string;
+  file_name: string;
+  file_url: string;
+  file_type: string;
+  file_size: number;
+  created_at: string;
+}
+
+export interface CallRequest {
+  id: string;
+  user_id: string;
+  job_id?: string;
+  recruiter_id: string;
+  status: 'pending' | 'completed' | 'cancelled';
+  phone_number: string;
+  preferred_time?: string;
+  notes?: string;
+  created_at: string;
+  job?: Job;
 }
 
 // Job-related functions
@@ -160,6 +184,111 @@ export const applicationService = {
   }
 };
 
+// Attachment-related functions
+export const attachmentService = {
+  async getByUserId(userId: string) {
+    const { data, error } = await supabase
+      .from('attachments')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async create(attachment: Omit<Attachment, 'id' | 'created_at'>) {
+    const { data, error } = await supabase
+      .from('attachments')
+      .insert([attachment])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async delete(id: string) {
+    const { error } = await supabase
+      .from('attachments')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+  },
+
+  async uploadFile(file: File, userId: string) {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${userId}/${Date.now()}.${fileExt}`;
+
+    const { data, error } = await supabase.storage
+      .from('attachments')
+      .upload(fileName, file);
+
+    if (error) throw error;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('attachments')
+      .getPublicUrl(fileName);
+
+    return { path: fileName, url: publicUrl };
+  }
+};
+
+// Call request functions
+export const callRequestService = {
+  async getByUserId(userId: string) {
+    const { data, error } = await supabase
+      .from('call_requests')
+      .select(`
+        *,
+        job:jobs(*)
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getByRecruiterId(recruiterId: string) {
+    const { data, error } = await supabase
+      .from('call_requests')
+      .select(`
+        *,
+        job:jobs(*)
+      `)
+      .eq('recruiter_id', recruiterId)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    return data || [];
+  },
+
+  async create(callRequest: Omit<CallRequest, 'id' | 'created_at'>) {
+    const { data, error } = await supabase
+      .from('call_requests')
+      .insert([callRequest])
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async updateStatus(id: string, status: CallRequest['status']) {
+    const { data, error } = await supabase
+      .from('call_requests')
+      .update({ status })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
+};
+
 // Auth helper functions
 export const authService = {
   async signUp(email: string, password: string) {
@@ -167,7 +296,7 @@ export const authService = {
       email,
       password,
     });
-    
+
     if (error) throw error;
     return data;
   },
@@ -177,7 +306,7 @@ export const authService = {
       email,
       password,
     });
-    
+
     if (error) throw error;
     return data;
   },
